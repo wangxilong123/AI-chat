@@ -79,7 +79,7 @@ const props = defineProps({
     type: Boolean,
     default: true
   },
-  statue: {
+  status: {
     type: String,
     default: 'sent'
   }
