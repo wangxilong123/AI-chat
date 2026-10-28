@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import type { Ref } from 'vue'
-import type { Message, Session } from '@/types/message'
+import type { Message, Session, SessionRaw, MessageRaw } from '@/types/message'
 import { getAllSessions, createSession as createSessionAPI, updateSessionTitle as updateSessionTitleAPI, deleteSession as deleteSessionAPI } from '@/api/session'
 import { getSessionsHistoryById, chat as sendMessageAPI } from '@/api/message'
 import { ElMessage } from 'element-plus'
@@ -21,18 +20,13 @@ export const useChatStore = defineStore('chat', () => {
   // 当前的消息列表
   const currentMessages = computed(() => {
     if (!currentSession.value) return []
-    return currentSession.value.messages?.value || []
+    return currentSession.value.messages || []
   })
 
   // 生成会话标题
   const generateSessionTitle = (content: string) => {
     if (content.length <= 20) return content
     return content.substring(0, 20) + '...'
-  }
-
- // 生成 Session UUID
-  const generateSessionId = () => {
-    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
   }
 
   // 生成 Message ID
@@ -47,7 +41,7 @@ export const useChatStore = defineStore('chat', () => {
       const newSession: Session = {
         id: res.data.id,
         title: res.data.title,
-        messages: ref<Message[]>([]),
+        messages: [],
         created_at: new Date(),
         updated_at: new Date()
       }
@@ -69,11 +63,12 @@ export const useChatStore = defineStore('chat', () => {
       await createSession();
     }
 
-    if (!currentSessionId.value) {
-      throw new Error('会话ID不存在')
+    const session = currentSession.value
+    if (!session) {
+      throw new Error('会话不存在')
     }
 
-    const sessionId = currentSessionId.value
+    const sessionId = session.id
 
     const userMsg: Message = {
       id: generateMessageId(),
@@ -83,9 +78,9 @@ export const useChatStore = defineStore('chat', () => {
       created_at: new Date(),
       status: 'sent'
     };
-    
+
     // 添加到当前会话
-    currentSession.value.messages.value.push(userMsg)
+    session.messages.push(userMsg)
     
     // 调用API
     try {
@@ -100,7 +95,7 @@ export const useChatStore = defineStore('chat', () => {
         created_at: new Date(),
         status: 'sent'
       }
-      currentSession.value.messages.value.push(assistantMsg)
+      session.messages.push(assistantMsg)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '请求失败，请重试'
       const errorMsg: Message = {
@@ -112,7 +107,7 @@ export const useChatStore = defineStore('chat', () => {
         status: 'error',
         errorMsg: errorMessage
       }
-      currentSession.value.messages.value.push(errorMsg)
+      session.messages.push(errorMsg)
     }
   }
 
@@ -123,12 +118,13 @@ export const useChatStore = defineStore('chat', () => {
       await createSession()
     }
 
-    const sessionId = currentSessionId.value
-    const session = sessions.value.find(s => s.id === sessionId)
+    const session = sessions.value.find(s => s.id === currentSessionId.value)
 
     if (!session) {
       throw new Error('会话不存在')
     }
+
+    const sessionId = session.id
 
     // 添加用户消息
     const userMsg: Message = {
@@ -139,18 +135,18 @@ export const useChatStore = defineStore('chat', () => {
       created_at: new Date(),
       status: 'sent'
     }
-    session.messages.value.push(userMsg)
+    session.messages.push(userMsg)
 
-    // 创建 AI 消息占位（空内容）
-    const assistantMsg = ref({
+    // 创建 AI 消息占位（空内容），推入响应式数组后直接修改即可触发更新
+    const assistantMsg: Message = {
       id: generateMessageId(),
       session_id: sessionId,
       role: 'assistant',
       content: '',
       created_at: new Date(),
       status: 'loading'
-    })
-    session.messages.value.push(assistantMsg.value)
+    }
+    session.messages.push(assistantMsg)
 
     // 调用流式 API
     try {
@@ -183,8 +179,8 @@ export const useChatStore = defineStore('chat', () => {
             try {
               const parsed = JSON.parse(data)
               if (parsed.content) {
-                assistantMsg.value.content += parsed.content
-                console.log('流式输出:', parsed.content) 
+                assistantMsg.content += parsed.content
+                console.log('流式输出:', parsed.content)
               }
             } catch (e) {
               console.warn('JSON 解析失败:', e)
@@ -194,12 +190,12 @@ export const useChatStore = defineStore('chat', () => {
       }
 
       // 流式结束，更新状态
-      assistantMsg.value.status = 'sent'
+      assistantMsg.status = 'sent'
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '请求失败，请重试'
-      assistantMsg.value.content = '请求失败，请重试'
-      assistantMsg.value.status = 'error'
-      assistantMsg.value.errorMsg = errorMessage
+      assistantMsg.content = '请求失败，请重试'
+      assistantMsg.status = 'error'
+      assistantMsg.errorMsg = errorMessage
     }
 
   }
@@ -208,9 +204,9 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const res = await getAllSessions()
       if (res.data && res.data.length > 0) {
-        sessions.value = res.data.map(item => ({
+        sessions.value = res.data.map((item: SessionRaw) => ({
           ...item,
-          messages: ref<Message[]>([]),
+          messages: [],
           created_at: new Date(item.created_at),
           updated_at: new Date(item.updated_at)
         }))
@@ -234,14 +230,14 @@ export const useChatStore = defineStore('chat', () => {
       if (session) {
         const messagesData = res.data || []
         if (Array.isArray(messagesData)) {
-          session.messages.value = messagesData.map(m => ({
+          session.messages = messagesData.map((m: MessageRaw) => ({
             ...m,
             created_at: new Date(m.created_at),
             status: 'sent' as const
           }))
         } else {
           console.error('消息数据格式错误:', messagesData)
-          session.messages.value = []
+          session.messages = []
         }
       }
     } catch (error) {
