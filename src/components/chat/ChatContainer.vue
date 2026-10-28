@@ -24,7 +24,6 @@
       </template>
     </div>
     
-    {{ inputText }}
     <div class="input-area">
       <InputArea 
         v-model="inputText"
