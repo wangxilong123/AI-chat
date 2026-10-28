@@ -24,8 +24,10 @@ export const useChatStore = defineStore('chat', () => {
   })
 
   // 生成 Message ID
-  const generateMessageId = () => {
-    return Date.now()
+  let msgSeq = 0
+  const generateMessageId = (): string => {
+    msgSeq += 1
+    return `m_${Date.now().toString(36)}_${msgSeq}`
   }
 
   // 创建新会话
@@ -226,6 +228,7 @@ export const useChatStore = defineStore('chat', () => {
         if (Array.isArray(messagesData)) {
           session.messages = messagesData.map((m: MessageRaw) => ({
             ...m,
+            id: String(m.id),
             created_at: new Date(m.created_at),
             status: 'sent' as const
           }))
