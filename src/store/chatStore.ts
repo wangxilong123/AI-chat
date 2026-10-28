@@ -23,12 +23,6 @@ export const useChatStore = defineStore('chat', () => {
     return currentSession.value.messages || []
   })
 
-  // 生成会话标题
-  const generateSessionTitle = (content: string) => {
-    if (content.length <= 20) return content
-    return content.substring(0, 20) + '...'
-  }
-
   // 生成 Message ID
   const generateMessageId = () => {
     return Date.now()
