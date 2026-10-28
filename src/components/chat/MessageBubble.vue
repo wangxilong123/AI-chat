@@ -10,7 +10,9 @@
       <!-- 气泡 -->
       <div class="message-bubble" :class="role">
         <div class="message-content">
-          {{ content }}<span v-if="status === 'loading'" class="cursor">|</span>
+          <span v-if="renderedContent" class="markdown-body" v-html="renderedContent"></span>
+          <template v-else>{{ content }}</template>
+          <span v-if="status === 'loading'" class="cursor">|</span>
         </div>
       </div>
       
@@ -61,6 +63,8 @@
 
 <script setup>
 import { CopyDocument, Refresh } from '@element-plus/icons-vue'
+import { computed } from 'vue'
+import { marked } from 'marked'
 
 const props = defineProps({
   role: {
@@ -93,6 +97,17 @@ const formatTime = (date) => {
     minute: '2-digit'
   })
 }
+
+// 单换行转 <br>，更符合聊天场景
+marked.setOptions({ breaks: true, gfm: true })
+
+const renderedContent = computed(() => {
+  // 用户消息保持纯文本，只有 AI 回复渲染 markdown
+  if (props.role !== 'assistant') return null
+  // 是AI，进行格式渲染
+  return marked.parse(props.content || '')
+})
+
 </script>
 
 <style scoped>
@@ -282,4 +297,48 @@ const formatTime = (date) => {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
 }
+
+.message-bubble {
+  white-space: normal;   /* 原来是 pre-wrap */
+}
+
+/* 基础排版 */
+.message-bubble :deep(.markdown-body) { display: block; }
+.message-bubble :deep(p) { margin: 0 0 8px; }
+.message-bubble :deep(p:last-child) { margin-bottom: 0; }
+.message-bubble :deep(ul),
+.message-bubble :deep(ol) { padding-left: 20px; margin: 8px 0; }
+.message-bubble :deep(h1),
+.message-bubble :deep(h2),
+.message-bubble :deep(h3) { margin: 12px 0 8px; line-height: 1.3; }
+
+/* 行内代码 */
+.message-bubble :deep(code) {
+  background: rgba(0,0,0,.06);
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-family: Consolas, Monaco, monospace;
+  font-size: .9em;
+}
+
+/* 代码块 */
+.message-bubble :deep(pre) {
+  background: #282c34;
+  color: #e6e6e6;
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.message-bubble :deep(pre code) {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+/* 表格 */
+.message-bubble :deep(table) { border-collapse: collapse; margin: 8px 0; }
+.message-bubble :deep(th),
+.message-bubble :deep(td) { border: 1px solid #dcdfe6; padding: 6px 10px; }
+
 </style>
