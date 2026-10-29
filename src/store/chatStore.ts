@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import type { Message, Session, SessionRaw, MessageRaw } from '@/types/message'
 import { getAllSessions, createSession as createSessionAPI, updateSessionTitle as updateSessionTitleAPI, deleteSession as deleteSessionAPI } from '@/api/session'
 import { getSessionsHistoryById, chat as sendMessageAPI } from '@/api/message'
@@ -134,15 +134,18 @@ export const useChatStore = defineStore('chat', () => {
     }
     session.messages.push(userMsg)
 
-    // 创建 AI 消息占位（空内容），推入响应式数组后直接修改即可触发更新
-    const assistantMsg: Message = {
+    // 创建 AI 消息占位（空内容）
+    // 必须用 reactive 包一层：push 进响应式数组时存的是原始对象，
+    // 直接改原始对象不会经过 proxy 的 set 陷阱，触发不了重新渲染
+    //（表现为内容不显示、status 一直是 loading → 光标一直闪）
+    const assistantMsg = reactive<Message>({
       id: generateMessageId(),
       session_id: sessionId,
       role: 'assistant',
       content: '',
       created_at: new Date(),
       status: 'loading'
-    }
+    })
     session.messages.push(assistantMsg)
 
     // 调用流式 API
@@ -185,7 +188,10 @@ export const useChatStore = defineStore('chat', () => {
       assistantMsg.status = 'sent'
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '请求失败，请重试'
-      assistantMsg.content = '请求失败，请重试'
+      // 已经收到部分内容时不要覆盖，否则用户看着看着内容会突然变成"请求失败"
+      if (!assistantMsg.content) {
+        assistantMsg.content = '请求失败，请重试'
+      }
       assistantMsg.status = 'error'
       assistantMsg.errorMsg = errorMessage
     }
