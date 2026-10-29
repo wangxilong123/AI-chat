@@ -5,6 +5,7 @@ import { getAllSessions, createSession as createSessionAPI, updateSessionTitle a
 import { getSessionsHistoryById, chat as sendMessageAPI } from '@/api/message'
 import { ElMessage } from 'element-plus'
 import { chatStream } from '@/api/stream'
+import { createSSEParser } from '@/utils/sse'
 
 export const useChatStore = defineStore('chat', () => {
   // 状态
@@ -154,36 +155,31 @@ export const useChatStore = defineStore('chat', () => {
         throw new Error('响应体为空')
       }
 
-      const reader = response.body.getReader()
+      const body = response.body
+      const reader = body.getReader()
       const decoder = new TextDecoder()
 
-      while(true) {
-        const result = await reader.read()  // 移除可选链
-        if (!result) break
-        const { done, value } = result
-        if (done) break
-        console.log('value', value)
-
-        const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split('\n')
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6)
-            if (data === '[DONE]') continue
-
-            try {
-              const parsed = JSON.parse(data)
-              if (parsed.content) {
-                assistantMsg.content += parsed.content
-                console.log('流式输出:', parsed.content)
-              }
-            } catch (e) {
-              console.warn('JSON 解析失败:', e)
-            }
+      // 按 \n\n 切事件，避免一条 data 被网络分片切断后解析失败丢内容
+      const parser = createSSEParser((payload) => {
+        if (payload === '[DONE]') return
+        try {
+          const parsed = JSON.parse(payload)
+          if (parsed.content) {
+            assistantMsg.content += parsed.content
           }
+        } catch (e) {
+          console.warn('SSE 数据解析失败，原文前 200 字：', payload.slice(0, 200))
         }
+      })
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        parser.push(decoder.decode(value, { stream: true }))
       }
+      // 收尾：把解码器里残留的不完整多字节字符吐出来（中文跨分片时会卡在这）
+      parser.push(decoder.decode())
+      parser.end()
 
       // 流式结束，更新状态
       assistantMsg.status = 'sent'
