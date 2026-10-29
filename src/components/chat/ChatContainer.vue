@@ -18,6 +18,7 @@
               :content="item.content"
               :timestamp="item.created_at"
               :status="item.status"
+              :error-msg="item.errorMsg"
             />
           </div>
         </div>

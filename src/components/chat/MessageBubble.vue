@@ -7,13 +7,23 @@
     
     <!-- 内容区域 -->
     <div class="message-content-area">
-      <!-- 气泡 -->
-      <div class="message-bubble" :class="role">
+      <!-- 气泡：一个字都没收到时只显示下面的错误提示，不显示空气泡 -->
+      <div
+        v-if="!hideBubble"
+        class="message-bubble"
+        :class="[role, { 'is-error': status === 'error' }]"
+      >
         <div class="message-content">
           <span v-if="renderedContent" class="markdown-body" v-html="renderedContent"></span>
           <template v-else>{{ content }}</template>
           <span v-if="status === 'loading'" class="cursor">|</span>
         </div>
+      </div>
+
+      <!-- 错误提示：可能一个字都没收到，所以不能放进气泡内部 -->
+      <div v-if="status === 'error'" class="message-error">
+        <el-icon class="error-icon"><WarningFilled /></el-icon>
+        <span class="error-text">{{ errorMsg || '请求失败，请重试' }}</span>
       </div>
       
       <!-- 底部：时间 + 操作按钮 -->
@@ -62,7 +72,7 @@
 </template>
 
 <script setup>
-import { CopyDocument, Refresh } from '@element-plus/icons-vue'
+import { CopyDocument, Refresh, WarningFilled } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 import { marked } from 'marked'
 
@@ -86,10 +96,18 @@ const props = defineProps({
   status: {
     type: String,
     default: 'sent'
+  },
+  // 失败原因，由 chatStore 在 catch 里写入；没有它错误就永远显示不出来
+  errorMsg: {
+    type: String,
+    default: ''
   }
 })
 
 defineEmits(['copy', 'regenerate'])
+
+// 失败且没收到任何内容时，气泡是空的，只保留错误提示
+const hideBubble = computed(() => props.status === 'error' && !props.content)
 
 const formatTime = (date) => {
   return new Date(date).toLocaleTimeString('zh-CN', {
@@ -211,6 +229,40 @@ const renderedContent = computed(() => {
   background: #f0f2f5;
   color: #1f1f1f;
   border-bottom-left-radius: 4px;
+}
+
+/* 失败但已经收到部分内容：气泡保留内容，加一圈浅红边框提示不完整 */
+.message-bubble.is-error {
+  border: 1px solid #fde2e2;
+}
+
+/* 错误提示条 */
+.message-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fef0f0;
+  border: 1px solid #fde2e2;
+  color: #f56c6c;
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.error-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  font-size: 16px;
+}
+
+.error-text {
+  flex: 1;
+  min-width: 0;
 }
 
 /* 内容文字 */

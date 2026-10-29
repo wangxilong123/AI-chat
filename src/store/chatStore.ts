@@ -151,22 +151,43 @@ export const useChatStore = defineStore('chat', () => {
     // 调用流式 API
     try {
       const response = await chatStream(sessionId, content)
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+        // 流式开始前出错时后端返回的是 JSON：{ error: '具体原因' }
+        let message = `请求失败（HTTP ${response.status}）`
+        try {
+          const data = await response.json()
+          if (data?.error) message = data.error
+        } catch {
+          // 响应不是 JSON，保留状态码提示
+        }
+        throw new Error(message)
       }
       if (!response.body) {
-        throw new Error('响应体为空')
+        throw new Error('响应体为空，请重试')
       }
 
       const body = response.body
       const reader = body.getReader()
       const decoder = new TextDecoder()
 
+      // 用对象当容器：闭包里赋值时 TS 看不到外层变量被改过，直接用变量会被收窄
+      const streamState: { error: Error | null } = { error: null }
+
       // 按 \n\n 切事件，避免一条 data 被网络分片切断后解析失败丢内容
       const parser = createSSEParser((payload) => {
         if (payload === '[DONE]') return
         try {
           const parsed = JSON.parse(payload)
+          // 上游/后端的失败会以 error 字段下发，此时 HTTP 状态码已经是 200
+          // error 既可能是字符串，也可能是 { message, type } 对象
+          if (parsed.error) {
+            const message = typeof parsed.error === 'string'
+              ? parsed.error
+              : parsed.error.message || 'AI 服务返回错误'
+            streamState.error = new Error(message)
+            return
+          }
           if (parsed.content) {
             assistantMsg.content += parsed.content
           }
@@ -179,19 +200,33 @@ export const useChatStore = defineStore('chat', () => {
         const { done, value } = await reader.read()
         if (done) break
         parser.push(decoder.decode(value, { stream: true }))
+        // 收到错误帧就不必继续读，主动断开，免得对着已经失败的上游干等
+        if (streamState.error) {
+          await reader.cancel().catch(() => {})
+          break
+        }
       }
       // 收尾：把解码器里残留的不完整多字节字符吐出来（中文跨分片时会卡在这）
       parser.push(decoder.decode())
       parser.end()
 
+      if (streamState.error) throw streamState.error
+
+      // 200 但一个 token 都没收到：这里原本会留下一个永远空着的空气泡
+      if (!assistantMsg.content) {
+        throw new Error('AI 没有返回任何内容，请重试')
+      }
+
       // 流式结束，更新状态
       assistantMsg.status = 'sent'
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '请求失败，请重试'
-      // 已经收到部分内容时不要覆盖，否则用户看着看着内容会突然变成"请求失败"
-      if (!assistantMsg.content) {
-        assistantMsg.content = '请求失败，请重试'
+      let errorMessage = error instanceof Error ? error.message : '请求失败，请重试'
+      // fetch 网络层失败抛的是 "Failed to fetch"，直接显示出来用户看不懂
+      if (error instanceof TypeError && /fetch|network/i.test(errorMessage)) {
+        errorMessage = '无法连接到服务器，请确认后端已启动'
       }
+      // 已经收到部分内容时不要覆盖，否则用户看着看着内容会突然变成"请求失败"；
+      // 一个字都没收到时保持内容为空，由 MessageBubble 用 errorMsg 单独渲染提示
       assistantMsg.status = 'error'
       assistantMsg.errorMsg = errorMessage
     }
